@@ -4535,6 +4535,7 @@ export class Config {
   async shutdown(options?: {
     shutdownTelemetry?: boolean;
     skipSessionWriter?: boolean;
+    strictResourceCleanup?: boolean;
   }): Promise<void> {
     this.shutdownRequested = true;
     this.settingsWatcher?.stopWatching();
@@ -4562,7 +4563,11 @@ export class Config {
         }
       }
 
-      await this.shutdownResources();
+      try {
+        await this.shutdownResources();
+      } catch (error) {
+        if (options?.strictResourceCleanup) throw error;
+      }
     } finally {
       if (!options?.skipSessionWriter) {
         await (earlyWriterClose ?? closeWriter());
@@ -4624,8 +4629,8 @@ export class Config {
       await this.cleanupArenaRuntime();
       await this.cleanupTeamRuntime();
     } catch (error) {
-      // Log but don't throw - cleanup should be best-effort
       this.debugLogger.error('Error during Config shutdown:', error);
+      throw error;
     }
   }
 
