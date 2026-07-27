@@ -1167,11 +1167,11 @@ export class ChatRecordingService {
   }
 
   private async closeOnce(): Promise<void> {
+    let flushFailure: unknown;
     try {
       await this.flush();
     } catch (error) {
-      this.state = 'integrity_failed';
-      throw error;
+      flushFailure = error;
     }
     const lease = this.binding?.lease;
     try {
@@ -1187,6 +1187,7 @@ export class ChatRecordingService {
       }
       throw error;
     }
+    if (flushFailure !== undefined) throw flushFailure;
   }
 
   hasWriteOwnership(): boolean {
