@@ -1911,7 +1911,9 @@ export class Config {
   private initialized: boolean = false;
   private initializationPromise?: Promise<void>;
   private initializationSucceeded = false;
+  private initializationSettled = false;
   private shutdownRequested = false;
+  private resourceShutdownAfterInitializationScheduled = false;
   private resourceShutdownPromise?: Promise<void>;
   private proxyDispatcherReady?: Promise<void>;
   storage: Storage;
@@ -2407,8 +2409,12 @@ export class Config {
     this.initialized = true;
     const initialization = this.initializeOnce(options);
     this.initializationPromise = initialization;
-    await initialization;
-    this.initializationSucceeded = true;
+    try {
+      await initialization;
+      this.initializationSucceeded = true;
+    } finally {
+      this.initializationSettled = true;
+    }
   }
 
   private async initializeOnce(
@@ -4564,7 +4570,7 @@ export class Config {
       }
 
       try {
-        await this.shutdownResources();
+        await this.shutdownResources(options?.strictResourceCleanup === true);
       } catch (error) {
         if (options?.strictResourceCleanup) throw error;
       }
@@ -4579,7 +4585,44 @@ export class Config {
     }
   }
 
-  private shutdownResources(): Promise<void> {
+  private async shutdownResources(
+    waitForInitialization: boolean,
+  ): Promise<void> {
+    if (waitForInitialization) {
+      try {
+        await this.initializationPromise;
+      } catch {
+        // Partial initialization still needs resource cleanup.
+      }
+    } else if (this.initializationPromise && !this.initializationSettled) {
+      this.scheduleResourceShutdownAfterInitialization();
+      return;
+    }
+    return this.runResourceShutdown();
+  }
+
+  private scheduleResourceShutdownAfterInitialization(): void {
+    if (
+      this.resourceShutdownAfterInitializationScheduled ||
+      !this.initializationPromise
+    ) {
+      return;
+    }
+    this.resourceShutdownAfterInitializationScheduled = true;
+    void this.initializationPromise
+      .then(
+        () => this.runResourceShutdown(),
+        () => this.runResourceShutdown(),
+      )
+      .catch((error) => {
+        this.debugLogger.error(
+          'Deferred Config resource cleanup failed:',
+          error,
+        );
+      });
+  }
+
+  private runResourceShutdown(): Promise<void> {
     if (this.resourceShutdownPromise) {
       return this.resourceShutdownPromise;
     }
@@ -4596,12 +4639,6 @@ export class Config {
 
   private async shutdownResourcesOnce(): Promise<void> {
     try {
-      try {
-        await this.initializationPromise;
-      } catch {
-        // Partial initialization still needs resource cleanup.
-      }
-
       // Drop this session's project-dir registry entry. It is registered during
       // initialization, so it is released here whenever that step completed —
       // in daemon mode, where one process serves many sessions, an unreleased

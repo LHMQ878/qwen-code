@@ -3904,7 +3904,7 @@ class QwenAgent implements Agent {
         `Session cleanup failed while preserving the original request error: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
       );
     }
-    throw error;
+    throw mapSessionWriterRequestError(error);
   }
 
   private pendingConfigCleanupKey(
@@ -10582,8 +10582,8 @@ class QwenAgent implements Agent {
     initializeOptions: ConfigInitializeOptions = {},
     chatRecording?: boolean,
   ): Promise<Config> {
-    this.assertManagedSessionAdmission();
     try {
+      this.assertManagedSessionAdmission();
       return await this.runWithPinnedRuntimeBaseDir(settings, cwd, async () => {
         await this.retryPendingConfigCleanup(
           Storage.getRuntimeBaseDir(),
